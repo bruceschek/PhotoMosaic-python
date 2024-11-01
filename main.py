@@ -4,7 +4,7 @@ import csv
 from re import match
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageEnhance
 from PIL.Image import Resampling
 import matplotlib.pyplot as plt
 
@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 # 1) average color matching
 # 2) pixel-level matching (either compare every pixel, or at least a sample grid of comparisons)
 #
-# "target inmage" - this is the original source image, from which the photomosaic is created
+# "target image" - this is the original source image, from which the photomosaic is created
 # "image collection" - some large collection of photos used as tiles in the eventual photomosaic.
 # "photomosaic" - the end product
 
@@ -32,7 +32,7 @@ def populate_image_tiles_folder():
 
     min_aspect_ratio = 1.2   # so, the image is used only if landscape, with width > 1.2 * height
     count = 0
-    target_number_of_tile_images = 20_000
+    target_number_of_tile_images = 41_000
 
     # Create the destination folder if it doesn't exist
     if not os.path.exists(image_tiles_folder):
@@ -50,9 +50,17 @@ def populate_image_tiles_folder():
                 if width > min_aspect_ratio * height:
                     # Resize the image to the fixed size (200x150)
                     resized_img = img.resize((tile_width_in_collection, tile_height_in_collection))
+
+                    # brighten the images, as this dataset seems very bland or dull
+                    enhancer = ImageEnhance.Brightness(resized_img)
+                    brightness_factor = 1.2  # Increase brightness by 50%
+                    brightened_image = enhancer.enhance(brightness_factor)
+
                     # Save the resized image to the destination folder
-                    resized_img.save(os.path.join(image_tiles_folder, file))
+                    brightened_image.save(os.path.join(image_tiles_folder, file))
                     count += 1
+                    if count % 100 == 0 :
+                        print(f"Preprocessing Count: {count}")
 
         if count >= target_number_of_tile_images: break
 
@@ -99,11 +107,74 @@ def get_ave_color_from_image_as_np_array(img_np) -> tuple:
     r_avg, g_avg, b_avg = np.mean(img_np, axis=(0, 1))
     return (int(r_avg), int(g_avg), int(b_avg))
 
-# given_tile is a tile of type numpy array
-def find_closest_tile(given_tile, metadata) -> tuple[str, int, int, int]:
+# def get_sum_of_sqrs_color_distance_between_tiles(tile1, tile2) -> int :
+
+# given_tile is a tile of type numpy array. it's a single tile out of the target image.
+# The given_tile is compared one by one against all images in the image collection.
+def find_closest_tile_by_pixel_level_comparison(tile_from_target) -> str :
+    # "distance" will be a sum of squares of rgb distance at several points across the tile
     min_distance = 10**9
     match_file_name = ''
-    r0, g0, b0 = -1, -1, -1
+    # iterate across all images in the image collection
+    for file in os.listdir(image_tiles_folder):
+        image_file_path = os.path.join(image_tiles_folder, file)
+        with Image.open(image_file_path) as img_from_collection:   # grab a candidate from image collection
+            depth, h1, w1 = tile_from_target.shape  # tile from the target image.  note that numpy arrays return shape in an odd tuple
+            w2, h2 = img_from_collection.size                 # the image pulled sequentially from image collection
+
+            # iterate across the x axis, half way up the y axis, examine n points equally spaced
+            # n pixels across x axis.  m increments across that span
+            m = 10
+            n1, n2 = w1, w2
+            step1 = (n1 - 1) / (m - 1)  # must be float, to assure that we end at n-1.  long story.
+            step2 = (n2 - 1) / (m - 1)
+
+            distance = 0  # sum of squares, across all pixels examined for this image
+            for i in range(m):
+                index1 = int(round( i * step1 ))
+                index2 = int(round( i * step2 ))
+
+                # note that numpy image pixel values are accessed by image[row, column] (NOT like x,y coordinates)
+                rgb1 = tile_from_target[ h1 // 2, index1 ]
+                rgb2 = img_from_collection.getpixel(( index2, h2//2 ))
+
+                # Convert rgb1 and rgb2 to larger integer types to avoid overflow
+                distance += (int(rgb1[0]) - int(rgb2[0])) ** 2 + (int(rgb1[1]) - int(rgb2[1])) ** 2 + (int(rgb1[2]) - int(rgb2[2])) ** 2
+
+            if distance < min_distance:
+                match_file_name = file
+                min_distance = distance
+
+    return match_file_name
+
+
+# given_tile is a tile of type numpy array
+# def find_closest_tile_by_tile_comparison(given_tile) -> str :
+#     # "distance" will be a sum of squares of rgb distance at several points across the tile
+#     min_distance = 10**9
+#     match_file_name = ''
+#     for file in os.listdir(image_tiles_folder):
+#         image_file_path = os.path.join(image_tiles_folder, file)
+#         with Image.open(image_file_path) as img:   # grab a candidate from image collection, and check its distance
+#             depth, h1, w1 = given_tile.shape  # tile from the source image.  note that numpy arrays return shape in an odd tuple
+#             w2, h2 = img.size                 # the image pulled sequentially from image collection
+#
+#             rgb1 = given_tile[ h1//2, w1//2 ]  # note that access to rgb value in numpy image is accessed as [y, x]
+#             rgb2 = img.getpixel((w2//2, h2//2))
+#
+#             # Convert rgb1 and rgb2 to larger integer types to avoid overflow
+#             distance = (int(rgb1[0]) - int(rgb2[0])) ** 2 + (int(rgb1[1]) - int(rgb2[1])) ** 2 + (int(rgb1[2]) - int(rgb2[2])) ** 2
+#
+#             if distance < min_distance:
+#                 match_file_name = file
+#                 min_distance = distance
+#     return match_file_name
+
+# given_tile is a tile of type numpy array
+def find_closest_tile_by_average_color(given_tile, metadata) -> str :
+    min_distance = 10**9
+    match_file_name = ''
+    # r0, g0, b0 = -1, -1, -1
     r, g, b = get_ave_color_from_image_as_np_array( given_tile )
     for d in metadata:
         rm, gm, bm = d[2], d[3], d[4]
@@ -112,11 +183,11 @@ def find_closest_tile(given_tile, metadata) -> tuple[str, int, int, int]:
         distance = (r-rm)**2 + (g-gm)**2 + (b-bm)**2
         if distance < min_distance:
             match_file_name = d[1]
-            r0, g0, b0 = rm, gm, bm
+            # r0, g0, b0 = rm, gm, bm
             min_distance = distance
     # if match_file_name == '':
     #     print()
-    return match_file_name, r0, g0, b0
+    return match_file_name
 
 
 #*****************************************************************************************************
@@ -156,11 +227,13 @@ def tile_the_target_image(target_file_name, tile_size, tile_scale_factor, metada
     # tiles = []  # This will hold all the image tiles as numpy arrays, two dimensions
     for y in range(0, height, tile_height):
         for x in range(0, width, tile_width):
+            print(f"y, x = {y}, {x}")
             # Extract tile from target image, to compare against all possible images in tile collection
             tile_from_target = image_target_np[y:y + tile_height, x:x + tile_width]
             r_target, g_target, b_target = get_ave_color_from_image_as_np_array(tile_from_target)
             # Get data from closest image in tile collection
-            file_name, r, g, b = find_closest_tile(tile_from_target, metadata)
+            # file_name = find_closest_tile_by_average_color(tile_from_target, metadata)
+            file_name = find_closest_tile_by_pixel_level_comparison(tile_from_target)
             file_folder_and_name = f"{image_tiles_folder}/{file_name}"
 
             # Beware, one or more of the collection images may be greyscale, and thus wrong "shape". So, convert to RGB.
@@ -199,12 +272,12 @@ if __name__ == '__main__':
 
     metadata = load_metadata_from_csv("metadata.csv")
 
-    target_image_file = 'fam sf xmas.jpg' # 'maui.jpeg' #'mona_lisa.jpg' # 'bruce and emma.jpg' # 'pure rgbw2.jpg'
+    target_image_file = 'maui.jpeg' #  'pure rgbw3.jpg'  # 'mona_lisa.jpg'  # 'fam sf xmas.jpg' # 'bruce and emma.jpg' #
 
     tile_width_in_collection = 200
     tile_height_in_collection = 150
     tile_collection_size =  tile_width_in_collection, tile_height_in_collection
-    tile_scale_factor = 3  # images from tile collection will be diveded by this scale
+    tile_scale_factor = 1  # images from tile collection will be diveded by this scale
 
     tile_the_target_image( target_image_file, tile_collection_size, tile_scale_factor, metadata )
 
