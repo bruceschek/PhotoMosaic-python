@@ -115,21 +115,15 @@ def find_closest_tile_by_pixel_level_comparison(tile_from_target, image_collecti
     # "distance" will be a sum of squares of rgb distance at several points across the tile
     min_distance = 10**9
     match_image = 0
+
     # iterate across all images in the image collection
-
-    # for file in os.listdir(image_tiles_folder):
-    #     image_file_path = os.path.join(image_tiles_folder, file)
-    #     with Image.open(image_file_path) as img_from_collection:   # grab a candidate from image collection
-
     for img_from_collection in image_collection_in_memory :
         # generally, below, "1" and "2" refer to target image and image collection items respectively
-        depth, h1, w1 = tile_from_target.shape  # tile from the target image.  note that numpy arrays return shape in an odd tuple
+        h1, w1, depth = tile_from_target.shape  # tile from the target image.  note that numpy arrays return shape in an odd tuple
         w2, h2 = img_from_collection.size                 # the image pulled sequentially from image collection
 
-        # iterate across the x axis, half way up the y axis, examine n points equally spaced
-        # n pixels across x axis.  m increments across that span
+        # Divide the target and sample image each into m x m parts, to sample colors across all m x m points.
         m = 10  # an arbitrary choice, depending how high resolution at we can to compare the images
-
         # prepare to step horizontally across a row
         row_step1 = (w1 - 1) / (m - 1)  # must be float, to assure that we end at n-1.  long story.
         row_step2 = (w2 - 1) / (m - 1)
@@ -149,8 +143,11 @@ def find_closest_tile_by_pixel_level_comparison(tile_from_target, image_collecti
                 col_index1 = int(round(j * col_step1))
                 col_index2 = int(round(j * col_step2))
 
+                # print(f"----(col_step1, row_step1), (col_step2, row_step2) = " +
+                #       f"{col_index1}, {row_index1}, -  {col_index2}, {row_index2} ")
+
                 # note that numpy image pixel values are accessed by image[row, column] (NOT like x,y coordinates)
-                rgb1 = tile_from_target[ col_index2, row_index1 ]
+                rgb1 = tile_from_target[ col_index1, row_index1 ]
                 rgb2 = img_from_collection.getpixel(( row_index2, col_index2 ))
 
                 # Convert rgb1 and rgb2 to larger integer types to avoid overflow
@@ -257,7 +254,7 @@ def tile_the_target_image(target_file_name, tile_size, tile_scale_factor, metada
 
             # Extract tile from target image, to compare against all possible images in tile collection
             tile_from_target = image_target_np[y:y + tile_height, x:x + tile_width]
-            r_target, g_target, b_target = get_ave_color_from_image_as_np_array(tile_from_target)
+            # r_target, g_target, b_target = get_ave_color_from_image_as_np_array(tile_from_target)
 
             # Get data from closest image in entire image collection, using one of the two algorithms
             if algorithm == "average":
@@ -292,15 +289,15 @@ if __name__ == '__main__':
 
     metadata = load_metadata_from_csv("metadata.csv")
 
-    target_image_file = 'fam sf xmas.jpg' # 'pure rgbw3.jpg' #  'maui.jpeg' # 'mona_lisa.jpg'  #  'bruce and emma.jpg' #
+    target_image_file = 'mona_lisa.jpg' # 'fam sf xmas.jpg' # 'pure rgbw3.jpg' # 'pure rgbw3.jpg' #  'maui.jpeg' #  'bruce and emma.jpg' #
 
     # per the wikipedia article on "photomosaic", "avereage" is their first example, "pixel_level" is second.
     algorithm =  "pixel_level"  # "average" #
 
-    tile_width_in_collection = 200
-    tile_height_in_collection = 150
+    tile_width_in_collection =  100 # 200
+    tile_height_in_collection =  75 # 150
     tile_collection_size =  tile_width_in_collection, tile_height_in_collection
-    tile_scale_factor = 1  # images from tile collection will be divided by this scale
+    tile_scale_factor = 2  # images from tile collection will be divided by this scale
 
     tile_the_target_image( target_image_file, tile_collection_size, tile_scale_factor, metadata, algorithm )
 
